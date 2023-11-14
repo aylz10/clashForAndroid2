@@ -142,7 +142,32 @@ class ProfileManager(private val context: Context) : IProfileManager,
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful||response.headers["subscription-userinfo"]==null) return
 
+                var upload: Long =0
+                var download: Long =0
+                var total: Long =0
                 var expire: Long =0
+                val userinfo=response.headers["subscription-userinfo"]
+                if (response.isSuccessful&&userinfo!=null){
+                    if (userinfo.split(";").length >0 && userinfo.split(";")?.get(0)?.split("=").length >1){
+                    upload= userinfo.split(";")?.get(0)?.split("=")
+                        ?.get(1)
+                        ?.toLong()
+                        ?: 0
+                    }
+                    if (userinfo.split(";").length >1 && userinfo.split(";")?.get(1)?.split("=").length >1){
+                    download= userinfo.split(";")?.get(1)?.split("=")
+                        ?.get(1)
+                        ?.toLong()
+                        ?: 0
+                    }
+                    if (userinfo.split(";").length >2 && userinfo.split(";")?.get(2)?.split("=").length >1){
+                    total=userinfo.split(";")?.get(2)?.split("=")
+                        ?.get(1)
+                        ?.toLong()
+                        ?: 0
+                    }
+                }
+                if (userinfo.split(";").length >3 && userinfo.split(";")?.get(3)?.split("=").length >1){
                 var expireStr=response.headers["subscription-userinfo"]?.split(";")?.get(3)?.split("=")
                     ?.get(1);
                 if (old.expire>0){
@@ -153,6 +178,7 @@ class ProfileManager(private val context: Context) : IProfileManager,
                 }else{
                     expire=0
                 }
+                }
 
                 val new = Imported(
                     old.uuid,
@@ -160,18 +186,9 @@ class ProfileManager(private val context: Context) : IProfileManager,
                     old.type,
                     old.source,
                     old.interval,
-                    response.headers["subscription-userinfo"]?.split(";")?.get(0)?.split("=")
-                        ?.get(1)
-                        ?.toLong()
-                        ?: 0,
-                    response.headers["subscription-userinfo"]?.split(";")?.get(1)?.split("=")
-                        ?.get(1)
-                        ?.toLong()
-                        ?: 0,
-                    response.headers["subscription-userinfo"]?.split(";")?.get(2)?.split("=")
-                        ?.get(1)
-                        ?.toLong()
-                        ?: 0,
+                    upload,
+                    download,
+                    total,
                     expire,
                     old?.createdAt ?: System.currentTimeMillis()
                 )
