@@ -70,6 +70,12 @@ fun Long.toBytesString(): String {
 fun Double.toProgress(): Int {
     return this.toInt()
 }
+fun Long.toDouble(): Double {
+    return this.toDouble()
+}
+fun Long.toFloat(): Float {
+    return this.toFloat()
+}
 fun Long.toDateStr(): String {
     val simpleDateFormat =SimpleDateFormat("yyyy年MM月dd日 HH:mm:ss")
 

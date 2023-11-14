@@ -99,7 +99,7 @@
                 android:layout_height="wrap_content"
                 android:max="1000"
                 android:visibility="@{profile.download==0 ? View.GONE : View.VISIBLE}"
-                android:progress="@{profile.download>0 ?I18nKt.toProgress ((profile.download+profile.upload)/(profile.total/1000)) :0}"
+                android:progress="@{profile.download>0 ?I18nKt.toProgress (I18nKt.toDouble(profile.download+profile.upload)/I18nKt.toDouble(profile.total)*1000) :0}"
                 />
         </LinearLayout>
 

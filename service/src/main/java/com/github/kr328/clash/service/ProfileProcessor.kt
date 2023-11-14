@@ -82,33 +82,31 @@ object ProfileProcessor {
 
                                 val userinfo=response.headers["subscription-userinfo"]
                                 if (response.isSuccessful&&userinfo!=null){
-                                    if (userinfo.split(";").length >0 && userinfo.split(";")?.get(0)?.split("=").length >1){
-                                    upload= userinfo.split(";")?.get(0)?.split("=")
-                                        ?.get(1)
-                                        ?.toLong()
-                                        ?: 0
+                                    if (userinfo.split(";")?.size!! >0 && userinfo.split(";")?.get(0)?.split("=")?.size!! >1){
+                                        upload= userinfo.split(";")?.get(0)?.split("=")
+                                            ?.get(1)
+                                            ?.toLong()
+                                            ?: 0
                                     }
-                                    if (userinfo.split(";").length >1 && userinfo.split(";")?.get(1)?.split("=").length >1){
-                                    download= userinfo.split(";")?.get(1)?.split("=")
-                                        ?.get(1)
-                                        ?.toLong()
-                                        ?: 0
+                                    if (userinfo.split(";")?.size!! >1 && userinfo.split(";")?.get(1)?.split("=")?.size!! >1){
+                                        download= userinfo.split(";")?.get(1)?.split("=")
+                                            ?.get(1)
+                                            ?.toLong()
+                                            ?: 0
                                     }
-                                    if (userinfo.split(";").length >2 && userinfo.split(";")?.get(2)?.split("=").length >1){
-                                    total=userinfo.split(";")?.get(2)?.split("=")
-                                        ?.get(1)
-                                        ?.toLong()
-                                        ?: 0
+                                    if (userinfo.split(";")?.size!! >2 && userinfo.split(";")?.get(2)?.split("=")?.size!! >1){
+                                        total=userinfo.split(";")?.get(2)?.split("=")
+                                            ?.get(1)
+                                            ?.toLong()
+                                            ?: 0
                                     }
-                                    if (nullIndexs.length >1){
-                                    if (userinfo.split(";").length >3 && userinfo.split(";")?.get(3)?.split("=").length >1){
-                                    var expireStr=userinfo.split(";")?.get(3)?.split("=")
-                                        ?.get(1);
-                                    if (expireStr?.count()!! >0){
-                                        expire =expireStr.toLong()
+                                    if (userinfo.split(";")?.size!! >3 && userinfo.split(";")?.get(3)?.split("=")?.size!! >1){
+                                        var expireStr=userinfo.split(";")?.get(3)?.split("=")
+                                            ?.get(1);
+                                        if (expireStr?.count()!! >0){
+                                            expire =expireStr.toLong()
 
-                                    }
-                                    }
+                                        }
                                     }
                                 }
                                 val new = Imported(
