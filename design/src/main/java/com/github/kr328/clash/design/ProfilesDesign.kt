@@ -2,6 +2,7 @@ package com.github.kr328.clash.design
 
 import android.app.Dialog
 import android.content.Context
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import com.github.kr328.clash.design.adapter.ProfileAdapter
@@ -78,7 +79,6 @@ class ProfilesDesign(context: Context) : Design<ProfilesDesign.Request>(context)
         binding.master = this
         binding.self = dialog
         binding.profile = profile
-
         dialog.setContentView(binding.root)
         dialog.show()
     }
@@ -88,6 +88,7 @@ class ProfilesDesign(context: Context) : Design<ProfilesDesign.Request>(context)
     }
 
     fun requestCreate() {
+
         requests.trySend(Request.Create)
     }
 
@@ -99,6 +100,7 @@ class ProfilesDesign(context: Context) : Design<ProfilesDesign.Request>(context)
         requests.trySend(Request.Update(profile))
 
         dialog.dismiss()
+
     }
 
     fun requestEdit(dialog: Dialog, profile: Profile) {

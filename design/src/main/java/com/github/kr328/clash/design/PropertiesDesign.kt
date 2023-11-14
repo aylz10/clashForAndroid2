@@ -142,6 +142,7 @@ class PropertiesDesign(context: Context) : Design<PropertiesDesign.Request>(cont
     }
 
     fun requestCommit() {
+
         requests.trySend(Request.Commit)
     }
 

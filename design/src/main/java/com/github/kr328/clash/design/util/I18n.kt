@@ -1,6 +1,7 @@
 package com.github.kr328.clash.design.util
 
 import android.content.Context
+import android.util.Log
 import com.github.kr328.clash.common.compat.preferredLocale
 import com.github.kr328.clash.core.model.Provider
 import com.github.kr328.clash.design.R
@@ -65,4 +66,12 @@ fun Long.toBytesString(): String {
         else ->
             "$this Bytes"
     }
+}
+fun Double.toProgress(): Int {
+    return this.toInt()
+}
+fun Long.toDateStr(): String {
+    val simpleDateFormat =SimpleDateFormat("yyyy年MM月dd日 HH:mm:ss")
+
+    return simpleDateFormat.format(Date(this*1000))
 }

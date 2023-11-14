@@ -4,7 +4,11 @@ import com.github.kr328.clash.common.util.intent
 import com.github.kr328.clash.common.util.setUUID
 import com.github.kr328.clash.common.util.ticker
 import com.github.kr328.clash.design.ProfilesDesign
+import com.github.kr328.clash.service.data.Imported
+import com.github.kr328.clash.service.data.ImportedDao
+import com.github.kr328.clash.service.data.PendingDao
 import com.github.kr328.clash.service.model.Profile
+import com.github.kr328.clash.service.util.sendProfileChanged
 import com.github.kr328.clash.util.withProfile
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.selects.select
@@ -40,7 +44,10 @@ class ProfilesActivity : BaseActivity<ProfilesDesign>() {
                                 }
                             }
                         is ProfilesDesign.Request.Update ->
-                            withProfile { update(it.profile.uuid) }
+                            withProfile {
+                                update(it.profile.uuid)
+
+                            }
                         is ProfilesDesign.Request.Delete ->
                             withProfile { delete(it.profile.uuid) }
                         is ProfilesDesign.Request.Edit ->

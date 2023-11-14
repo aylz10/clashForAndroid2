@@ -17,6 +17,7 @@ buildscript {
         classpath(libs.build.kotlin.serialization)
         classpath(libs.build.ksp)
         classpath(libs.build.golang)
+
     }
 }
 
@@ -34,7 +35,7 @@ subprojects {
     extensions.configure<BaseExtension> {
         defaultConfig {
             if (isApp) {
-                applicationId = "com.github.kr328.clash"
+                applicationId = "com.github.kr328.clash.dj"
             }
 
             minSdk = 21

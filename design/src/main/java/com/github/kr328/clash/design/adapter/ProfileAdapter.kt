@@ -1,12 +1,14 @@
 package com.github.kr328.clash.design.adapter
 
 import android.content.Context
+import android.util.Log
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.github.kr328.clash.design.databinding.AdapterProfileBinding
 import com.github.kr328.clash.design.ui.ObservableCurrentTime
 import com.github.kr328.clash.design.util.layoutInflater
 import com.github.kr328.clash.service.model.Profile
+
 
 class ProfileAdapter(
     private val context: Context,
@@ -37,10 +39,11 @@ class ProfileAdapter(
 
         if (current === binding.profile)
             return
-
         binding.profile = current
+
         binding.setClicked {
             onClicked(current)
+            //this.notifyItemChanged(position)
         }
         binding.setMenu {
             onMenuClicked(current)
@@ -50,4 +53,7 @@ class ProfileAdapter(
     override fun getItemCount(): Int {
         return profiles.size
     }
+
+
+
 }

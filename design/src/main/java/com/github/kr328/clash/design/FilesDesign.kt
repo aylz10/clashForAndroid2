@@ -2,6 +2,7 @@ package com.github.kr328.clash.design
 
 import android.app.Dialog
 import android.content.Context
+import android.util.Log
 import android.view.View
 import com.github.kr328.clash.design.adapter.FileAdapter
 import com.github.kr328.clash.design.databinding.DesignFilesBinding

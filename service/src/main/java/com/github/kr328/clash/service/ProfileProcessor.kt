@@ -19,6 +19,9 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okio.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -63,31 +66,122 @@ object ProfileProcessor {
                             .deleteRecursively()
                         context.processingDir
                             .copyRecursively(context.importedDir.resolve(snapshot.uuid.toString()))
-
                         val old = ImportedDao().queryByUUID(snapshot.uuid)
+                        var upload: Long =0
+                        var download: Long =0
+                        var total: Long =0
+                        var expire: Long =0
+                        if(snapshot?.type==Profile.Type.Url){
+                            val client = OkHttpClient()
+                            val request = Request.Builder()
+                                .url(snapshot?.source+"&flag=clash")
+                                .header("User-Agent", "ClashforWindows/0.19.23")
+                                .build()
 
-                        val new = Imported(
-                            snapshot.uuid,
-                            snapshot.name,
-                            snapshot.type,
-                            snapshot.source,
-                            snapshot.interval,
-                            old?.createdAt ?: System.currentTimeMillis()
-                        )
+                            client.newCall(request).execute().use { response ->
 
-                        if (old != null) {
-                            ImportedDao().update(new)
-                        } else {
-                            ImportedDao().insert(new)
+                                val userinfo=response.headers["subscription-userinfo"]
+                                if (response.isSuccessful&&userinfo!=null){
+
+                                    upload= userinfo.split(";")?.get(0)?.split("=")
+                                        ?.get(1)
+                                        ?.toLong()
+                                        ?: 0
+                                    download= userinfo.split(";")?.get(1)?.split("=")
+                                        ?.get(1)
+                                        ?.toLong()
+                                        ?: 0
+                                    total=userinfo.split(";")?.get(2)?.split("=")
+                                        ?.get(1)
+                                        ?.toLong()
+                                        ?: 0
+                                    var expireStr=userinfo.split(";")?.get(3)?.split("=")
+                                        ?.get(1);
+                                    if (expireStr?.count()!! >0){
+                                        expire =expireStr.toLong()
+
+                                    }
+                                }
+                                val new = Imported(
+                                    snapshot.uuid,
+                                    snapshot.name,
+                                    snapshot.type,
+                                    snapshot.source,
+                                    snapshot.interval,
+                                    upload,
+                                    download,
+                                    total,
+                                    expire,
+                                    old?.createdAt ?: System.currentTimeMillis()
+                                )
+                                if (old != null) {
+                                    ImportedDao().update(new)
+                                } else {
+                                    ImportedDao().insert(new)
+                                }
+
+                                PendingDao().remove(snapshot.uuid)
+
+                                context.pendingDir.resolve(snapshot.uuid.toString())
+                                    .deleteRecursively()
+
+                                context.sendProfileChanged(snapshot.uuid)
+                            }
+                        }else if (snapshot?.type==Profile.Type.File){
+                            val new = Imported(
+                                snapshot.uuid,
+                                snapshot.name,
+                                snapshot.type,
+                                snapshot.source,
+                                snapshot.interval,
+                                upload,
+                                download,
+                                total,
+                                expire,
+                                old?.createdAt ?: System.currentTimeMillis()
+                            )
+                            if (old != null) {
+                                ImportedDao().update(new)
+                            } else {
+                                ImportedDao().insert(new)
+                            }
+
+                            PendingDao().remove(snapshot.uuid)
+
+                            context.pendingDir.resolve(snapshot.uuid.toString())
+                                .deleteRecursively()
+
+                            context.sendProfileChanged(snapshot.uuid)
+                        }
+//
+//                        val new = Imported(
+//                            snapshot.uuid,
+//                            snapshot.name,
+//                            snapshot.type,
+//                            snapshot.source,
+//                            snapshot.interval,
+//                            0,
+//                            0,
+//                            0,
+//                            0,
+//                            old?.createdAt ?: System.currentTimeMillis()
+//                        )
+//
+//                        if (old != null) {
+//                            ImportedDao().update(new)
+//                        } else {
+//                            ImportedDao().insert(new)
+//                        }
+//
+//                        PendingDao().remove(snapshot.uuid)
+//
+//                        context.pendingDir.resolve(snapshot.uuid.toString())
+//                            .deleteRecursively()
+//
+//                        context.sendProfileChanged(snapshot.uuid)
+
                         }
 
-                        PendingDao().remove(snapshot.uuid)
-
-                        context.pendingDir.resolve(snapshot.uuid.toString())
-                            .deleteRecursively()
-
-                        context.sendProfileChanged(snapshot.uuid)
-                    }
                 }
             }
         }
@@ -146,6 +240,13 @@ object ProfileProcessor {
                 pending.deleteRecursively()
                 imported.deleteRecursively()
 
+                context.sendProfileChanged(uuid)
+            }
+        }
+    }
+    suspend fun update(context: Context, uuid: UUID) {
+        withContext(NonCancellable) {
+            profileLock.withLock {
                 context.sendProfileChanged(uuid)
             }
         }

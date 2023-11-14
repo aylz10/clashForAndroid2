@@ -1,22 +1,20 @@
 package com.github.kr328.clash.service
 
 import android.content.Context
-import com.github.kr328.clash.service.data.Database
-import com.github.kr328.clash.service.data.ImportedDao
-import com.github.kr328.clash.service.data.Pending
-import com.github.kr328.clash.service.data.PendingDao
+import android.util.Log
+import com.github.kr328.clash.service.data.*
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.remote.IFetchObserver
 import com.github.kr328.clash.service.remote.IProfileManager
 import com.github.kr328.clash.service.store.ServiceStore
-import com.github.kr328.clash.service.util.directoryLastModified
-import com.github.kr328.clash.service.util.generateProfileUUID
-import com.github.kr328.clash.service.util.importedDir
-import com.github.kr328.clash.service.util.pendingDir
+import com.github.kr328.clash.service.util.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okio.IOException
 import java.io.FileNotFoundException
 import java.util.*
 
@@ -40,6 +38,10 @@ class ProfileManager(private val context: Context) : IProfileManager,
             type = type,
             source = source,
             interval = 0,
+            upload=0,
+            total = 0,
+            download = 0,
+            expire = 0,
         )
 
         PendingDao().insert(pending)
@@ -68,6 +70,10 @@ class ProfileManager(private val context: Context) : IProfileManager,
             type = Profile.Type.File,
             source = imported.source,
             interval = imported.interval,
+            upload=imported.upload,
+            total = imported.total,
+            download = imported.download,
+            expire = imported.expire,
         )
 
         cloneImportedFiles(uuid, newUUID)
@@ -93,13 +99,21 @@ class ProfileManager(private val context: Context) : IProfileManager,
                     type = imported.type,
                     source = source,
                     interval = interval,
+                    upload=0,
+                    total = 0,
+                    download = 0,
+                    expire = 0,
                 )
             )
         } else {
             val newPending = pending.copy(
                 name = name,
                 source = source,
-                interval = interval
+                interval = interval,
+                upload=0,
+                total = 0,
+                download = 0,
+                expire = 0,
             )
 
             PendingDao().update(newPending)
@@ -108,8 +122,77 @@ class ProfileManager(private val context: Context) : IProfileManager,
 
     override suspend fun update(uuid: UUID) {
         scheduleUpdate(uuid, true)
-    }
+        ImportedDao().queryByUUID(uuid)?.let {
+            if(it.type==Profile.Type.Url){
+                updateFlow(it)
+            }
 
+        }
+
+    }
+    suspend fun updateFlow(old: Imported) {
+        val client = OkHttpClient()
+        try {
+            val request = Request.Builder()
+           .url(old?.source+"&flag=clash")
+//                .url("https://blog.csdn.net")
+                .header("User-Agent", "ClashforWindows/0.19.23")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful||response.headers["subscription-userinfo"]==null) return
+
+                var expire: Long =0
+                var expireStr=response.headers["subscription-userinfo"]?.split(";")?.get(3)?.split("=")
+                    ?.get(1);
+                if (old.expire>0){
+                    expire=old.expire
+                }else if (expireStr?.count()!! >0){
+                    expire =expireStr.toLong()
+
+                }else{
+                    expire=0
+                }
+
+                val new = Imported(
+                    old.uuid,
+                    old.name,
+                    old.type,
+                    old.source,
+                    old.interval,
+                    response.headers["subscription-userinfo"]?.split(";")?.get(0)?.split("=")
+                        ?.get(1)
+                        ?.toLong()
+                        ?: 0,
+                    response.headers["subscription-userinfo"]?.split(";")?.get(1)?.split("=")
+                        ?.get(1)
+                        ?.toLong()
+                        ?: 0,
+                    response.headers["subscription-userinfo"]?.split(";")?.get(2)?.split("=")
+                        ?.get(1)
+                        ?.toLong()
+                        ?: 0,
+                    expire,
+                    old?.createdAt ?: System.currentTimeMillis()
+                )
+
+                if (old != null) {
+                    ImportedDao().update(new)
+                } else {
+                    ImportedDao().insert(new)
+                }
+
+                PendingDao().remove(new.uuid)
+                context.sendProfileChanged(new.uuid)
+                // println(response.body!!.string())
+            }
+
+        }catch (e: Exception) {
+           System.out.println(e)
+        }
+
+
+    }
     override suspend fun commit(uuid: UUID, callback: IFetchObserver?) {
         ProfileProcessor.apply(context, uuid, callback)
 
@@ -163,6 +246,10 @@ class ProfileManager(private val context: Context) : IProfileManager,
         val type = pending?.type ?: imported?.type ?: return null
         val source = pending?.source ?: imported?.source ?: return null
         val interval = pending?.interval ?: imported?.interval ?: return null
+        val upload = pending?.upload ?: imported?.upload ?: return null
+        val download = pending?.download ?: imported?.download ?: return null
+        val total = pending?.total ?: imported?.total ?: return null
+        val expire = pending?.expire ?: imported?.expire ?: return null
 
         return Profile(
             uuid,
@@ -171,6 +258,10 @@ class ProfileManager(private val context: Context) : IProfileManager,
             source,
             active != null && imported?.uuid == active,
             interval,
+            upload,
+            download,
+            total,
+            expire,
             resolveUpdatedAt(uuid),
             imported != null,
             pending != null

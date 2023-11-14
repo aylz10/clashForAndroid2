@@ -133,7 +133,11 @@ class Picker(private val context: Context) {
                 imported.name,
                 imported.type,
                 imported.source,
-                imported.interval
+                imported.interval,
+                0,
+                0,
+                0,
+                0,
             )
         )
 
