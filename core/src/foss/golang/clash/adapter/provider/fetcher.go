@@ -11,6 +11,10 @@ import (
 	"github.com/Dreamacro/clash/log"
 )
 
+const (
+	minInterval = time.Minute * 5
+)
+
 var (
 	fileMode os.FileMode = 0o666
 	dirMode  os.FileMode = 0o755
@@ -21,9 +25,8 @@ type parser = func([]byte) (any, error)
 type fetcher struct {
 	name      string
 	vehicle   types.Vehicle
+	updatedAt time.Time
 	interval  time.Duration
-	updatedAt *time.Time
-	ticker    *time.Ticker
 	done      chan struct{}
 	hash      [16]byte
 	parser    parser
@@ -40,19 +43,18 @@ func (f *fetcher) VehicleType() types.VehicleType {
 
 func (f *fetcher) Initial() (any, error) {
 	var (
-		buf               []byte
-		err               error
-		isLocal           bool
-		immediatelyUpdate bool
+		buf     []byte
+		err     error
+		isLocal bool
 	)
 	if stat, fErr := os.Stat(f.vehicle.Path()); fErr == nil {
 		buf, err = os.ReadFile(f.vehicle.Path())
 		modTime := stat.ModTime()
-		f.updatedAt = &modTime
+		f.updatedAt = modTime
 		isLocal = true
-		immediatelyUpdate = time.Since(modTime) > f.interval
 	} else {
 		buf, err = f.vehicle.Read()
+		f.updatedAt = time.Now()
 	}
 
 	if err != nil {
@@ -64,6 +66,8 @@ func (f *fetcher) Initial() (any, error) {
 		if !isLocal {
 			return nil, err
 		}
+
+		log.Warnln("Initial local provider %s: %s", f.Name(), err.Error())
 
 		// parse local file error, fallback to remote
 		buf, err = f.vehicle.Read()
@@ -88,8 +92,8 @@ func (f *fetcher) Initial() (any, error) {
 	f.hash = md5.Sum(buf)
 
 	// pull proxies automatically
-	if f.ticker != nil {
-		go f.pullLoop(immediatelyUpdate)
+	if f.interval > 0 {
+		go f.pullLoop()
 	}
 
 	return proxies, nil
@@ -104,8 +108,10 @@ func (f *fetcher) Update() (any, bool, error) {
 	now := time.Now()
 	hash := md5.Sum(buf)
 	if bytes.Equal(f.hash[:], hash[:]) {
-		f.updatedAt = &now
-		os.Chtimes(f.vehicle.Path(), now, now)
+		f.updatedAt = now
+
+		os.Chtimes(f.vehicle.Path(), time.Now(), time.Now())
+
 		return nil, true, nil
 	}
 
@@ -120,48 +126,49 @@ func (f *fetcher) Update() (any, bool, error) {
 		}
 	}
 
-	f.updatedAt = &now
+	f.updatedAt = now
 	f.hash = hash
 
 	return proxies, false, nil
 }
 
 func (f *fetcher) Destroy() error {
-	if f.ticker != nil {
+	if f.interval > 0 {
 		f.done <- struct{}{}
 	}
 	return nil
 }
 
-func (f *fetcher) pullLoop(immediately bool) {
-	update := func() {
-		elm, same, err := f.Update()
-		if err != nil {
-			log.Warnln("[Provider] %s pull error: %s", f.Name(), err.Error())
-			return
-		}
-
-		if same {
-			log.Debugln("[Provider] %s's proxies doesn't change", f.Name())
-			return
-		}
-
-		log.Infoln("[Provider] %s's proxies update", f.Name())
-		if f.onUpdate != nil {
-			f.onUpdate(elm)
-		}
+func (f *fetcher) pullLoop() {
+	initialInterval := f.interval - time.Since(f.updatedAt)
+	if initialInterval < minInterval {
+		initialInterval = minInterval
 	}
 
-	if immediately {
-		update()
-	}
+	timer := time.NewTimer(initialInterval)
+	defer timer.Stop()
 
 	for {
 		select {
-		case <-f.ticker.C:
-			update()
+		case <-timer.C:
+			timer.Reset(f.interval)
+
+			elm, same, err := f.Update()
+			if err != nil {
+				log.Warnln("[Provider] %s pull error: %s", f.Name(), err.Error())
+				continue
+			}
+
+			if same {
+				log.Debugln("[Provider] %s's proxies doesn't change", f.Name())
+				continue
+			}
+
+			log.Infoln("[Provider] %s's proxies update", f.Name())
+			if f.onUpdate != nil {
+				f.onUpdate(elm)
+			}
 		case <-f.done:
-			f.ticker.Stop()
 			return
 		}
 	}
@@ -180,18 +187,12 @@ func safeWrite(path string, buf []byte) error {
 }
 
 func newFetcher(name string, interval time.Duration, vehicle types.Vehicle, parser parser, onUpdate func(any)) *fetcher {
-	var ticker *time.Ticker
-	if interval != 0 {
-		ticker = time.NewTicker(interval)
-	}
-
 	return &fetcher{
 		name:     name,
-		ticker:   ticker,
-		vehicle:  vehicle,
 		interval: interval,
+		vehicle:  vehicle,
 		parser:   parser,
-		done:     make(chan struct{}, 1),
+		done:     make(chan struct{}, 8),
 		onUpdate: onUpdate,
 	}
 }
