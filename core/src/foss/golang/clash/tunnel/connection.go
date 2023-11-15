@@ -3,28 +3,15 @@ package tunnel
 import (
 	"errors"
 	"net"
+	"net/netip"
 	"time"
 
 	N "github.com/Dreamacro/clash/common/net"
 	"github.com/Dreamacro/clash/common/pool"
-	"github.com/Dreamacro/clash/component/resolver"
 	C "github.com/Dreamacro/clash/constant"
 )
 
-func handleUDPToRemote(packet C.UDPPacket, pc net.PacketConn, metadata *C.Metadata) error {
-	pc = unwrapPacket(pc)
-
-	defer packet.Drop()
-
-	// local resolve UDP dns
-	if !metadata.Resolved() {
-		ip, err := resolver.ResolveIP(metadata.Host)
-		if err != nil {
-			return err
-		}
-		metadata.DstIP = ip
-	}
-
+func handleUDPToRemote(packet C.UDPPacket, pc C.PacketConn, metadata *C.Metadata) error {
 	addr := metadata.UDPAddr()
 	if addr == nil {
 		return errors.New("udp addr invalid")
@@ -39,9 +26,7 @@ func handleUDPToRemote(packet C.UDPPacket, pc net.PacketConn, metadata *C.Metada
 	return nil
 }
 
-func handleUDPToLocal(packet C.UDPPacket, pc net.PacketConn, key string, fAddr net.Addr) {
-	pc = unwrapPacket(pc)
-
+func handleUDPToLocal(packet C.UDPPacket, pc net.PacketConn, key string, oAddr, fAddr netip.Addr) {
 	buf := pool.Get(pool.UDPBufferSize)
 	defer pool.Put(buf)
 	defer natTable.Delete(key)
@@ -54,11 +39,16 @@ func handleUDPToLocal(packet C.UDPPacket, pc net.PacketConn, key string, fAddr n
 			return
 		}
 
-		if fAddr != nil {
-			from = fAddr
+		fromUDPAddr := *from.(*net.UDPAddr)
+		if fAddr.IsValid() {
+			fromAddr, _ := netip.AddrFromSlice(fromUDPAddr.IP)
+			fromAddr = fromAddr.Unmap()
+			if oAddr == fromAddr {
+				fromUDPAddr.IP = fAddr.AsSlice()
+			}
 		}
 
-		_, err = packet.WriteBack(buf[:n], from)
+		_, err = packet.WriteBack(buf[:n], &fromUDPAddr)
 		if err != nil {
 			return
 		}
@@ -66,12 +56,5 @@ func handleUDPToLocal(packet C.UDPPacket, pc net.PacketConn, key string, fAddr n
 }
 
 func handleSocket(ctx C.ConnContext, outbound net.Conn) {
-	left := unwrap(ctx.Conn())
-	right := unwrap(outbound)
-
-	if relayHijack(left, right) {
-		return
-	}
-
-	N.Relay(left, right)
+	N.Relay(ctx.Conn(), outbound)
 }

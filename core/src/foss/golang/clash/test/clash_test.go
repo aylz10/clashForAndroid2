@@ -8,23 +8,22 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
-	"runtime"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/Dreamacro/clash/adapter/outbound"
-	C "github.com/Dreamacro/clash/constant"
-	"github.com/Dreamacro/clash/hub/executor"
-	"github.com/Dreamacro/clash/transport/socks5"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Dreamacro/clash/adapter/outbound"
+	C "github.com/Dreamacro/clash/constant"
+	"github.com/Dreamacro/clash/hub/executor"
+	"github.com/Dreamacro/clash/transport/socks5"
 )
 
 const (
@@ -39,7 +38,7 @@ const (
 
 var (
 	waitTime = time.Second
-	localIP  = net.ParseIP("127.0.0.1")
+	localIP  = netip.MustParseAddr("127.0.0.1")
 
 	defaultExposedPorts = nat.PortSet{
 		"10002/tcp": struct{}{},
@@ -53,7 +52,6 @@ var (
 			{HostPort: "10002", HostIP: "0.0.0.0"},
 		},
 	}
-	isDarwin = runtime.GOOS == "darwin"
 )
 
 func init() {
@@ -63,13 +61,6 @@ func init() {
 	}
 	homeDir := filepath.Join(currentDir, "config")
 	C.SetHomeDir(homeDir)
-
-	if isDarwin {
-		localIP, err = defaultRouteIP()
-		if err != nil {
-			panic(err)
-		}
-	}
 
 	c, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -209,23 +200,27 @@ func newLargeDataPair() (chan hashPair, chan hashPair, func(t *testing.T) error)
 	return pingCh, pongCh, test
 }
 
-func testPingPongWithSocksPort(t *testing.T, port int) {
+func testPingPongWithSocksPort(t *testing.T, port int) error {
+	l, err := Listen("tcp", ":10001")
+	require.NoError(t, err)
+	defer l.Close()
+
 	pingCh, pongCh, test := newPingPongPair()
 	go func() {
-		l, err := Listen("tcp", ":10001")
-		require.NoError(t, err)
-		defer l.Close()
-
 		c, err := l.Accept()
-		require.NoError(t, err)
+		if err != nil {
+			return
+		}
 
 		buf := make([]byte, 4)
-		_, err = io.ReadFull(c, buf)
-		require.NoError(t, err)
+		if _, err = io.ReadFull(c, buf); err != nil {
+			return
+		}
 
 		pingCh <- buf
-		_, err = c.Write([]byte("pong"))
-		require.NoError(t, err)
+		if _, err = c.Write([]byte("pong")); err != nil {
+			return
+		}
 	}()
 
 	go func() {
@@ -233,20 +228,23 @@ func testPingPongWithSocksPort(t *testing.T, port int) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		_, err = socks5.ClientHandshake(c, socks5.ParseAddr("127.0.0.1:10001"), socks5.CmdConnect, nil)
-		require.NoError(t, err)
+		if _, err = socks5.ClientHandshake(c, socks5.ParseAddr("127.0.0.1:10001"), socks5.CmdConnect, nil); err != nil {
+			return
+		}
 
-		_, err = c.Write([]byte("ping"))
-		require.NoError(t, err)
+		if _, err = c.Write([]byte("ping")); err != nil {
+			return
+		}
 
 		buf := make([]byte, 4)
-		_, err = io.ReadFull(c, buf)
-		require.NoError(t, err)
+		if _, err = io.ReadFull(c, buf); err != nil {
+			return
+		}
 
 		pongCh <- buf
 	}()
 
-	test(t)
+	return test(t)
 }
 
 func testPingPongWithConn(t *testing.T, c net.Conn) error {
@@ -295,7 +293,7 @@ func testPingPongWithPacketConn(t *testing.T, pc net.PacketConn) error {
 	require.NoError(t, err)
 	defer l.Close()
 
-	rAddr := &net.UDPAddr{IP: localIP, Port: 10001}
+	rAddr := &net.UDPAddr{IP: localIP.AsSlice(), Port: 10001}
 
 	pingCh, pongCh, test := newPingPongPair()
 	go func() {
@@ -430,7 +428,7 @@ func testLargeDataWithPacketConn(t *testing.T, pc net.PacketConn) error {
 	require.NoError(t, err)
 	defer l.Close()
 
-	rAddr := &net.UDPAddr{IP: localIP, Port: 10001}
+	rAddr := &net.UDPAddr{IP: localIP.AsSlice(), Port: 10001}
 
 	times := 50
 	chunkSize := int64(1024)
@@ -438,27 +436,30 @@ func testLargeDataWithPacketConn(t *testing.T, pc net.PacketConn) error {
 	pingCh, pongCh, test := newLargeDataPair()
 	writeRandData := func(pc net.PacketConn, addr net.Addr) (map[int][]byte, error) {
 		hashMap := map[int][]byte{}
-		mux := sync.Mutex{}
+		bufs := [][]byte{}
+
 		for i := 0; i < times; i++ {
-			go func(idx int) {
-				buf := make([]byte, chunkSize)
-				if _, err := rand.Read(buf[1:]); err != nil {
-					t.Log(err.Error())
-					return
-				}
-				buf[0] = byte(idx)
+			idx := i
+			buf := make([]byte, chunkSize)
+			rand.Read(buf[1:])
+			buf[0] = byte(idx)
 
-				hash := md5.Sum(buf)
-				mux.Lock()
-				hashMap[idx] = hash[:]
-				mux.Unlock()
-
-				if _, err := pc.WriteTo(buf, addr); err != nil {
-					t.Log(err.Error())
-					return
-				}
-			}(i)
+			hash := md5.Sum(buf)
+			hashMap[idx] = hash[:]
+			bufs = append(bufs, buf)
 		}
+
+		go func() {
+			cursor := 0
+			for {
+				idx := cursor % times
+				buf := bufs[idx]
+				if _, err := pc.WriteTo(buf, addr); err != nil {
+					return
+				}
+				cursor++
+			}
+		}()
 
 		return hashMap, nil
 	}
@@ -468,15 +469,16 @@ func testLargeDataWithPacketConn(t *testing.T, pc net.PacketConn) error {
 		hashMap := map[int][]byte{}
 		buf := make([]byte, 64*1024)
 
-		for i := 0; i < times; i++ {
+		for len(hashMap) != times {
 			_, rAddr, err = l.ReadFrom(buf)
 			if err != nil {
-				t.Log(err.Error())
 				return
 			}
 
-			hash := md5.Sum(buf[:chunkSize])
-			hashMap[int(buf[0])] = hash[:]
+			if _, ok := hashMap[int(buf[0])]; !ok {
+				hash := md5.Sum(buf[:chunkSize])
+				hashMap[int(buf[0])] = hash[:]
+			}
 		}
 
 		sendHash, err := writeRandData(l, rAddr)
@@ -501,15 +503,16 @@ func testLargeDataWithPacketConn(t *testing.T, pc net.PacketConn) error {
 		hashMap := map[int][]byte{}
 		buf := make([]byte, 64*1024)
 
-		for i := 0; i < times; i++ {
+		for len(hashMap) != times {
 			_, _, err := pc.ReadFrom(buf)
 			if err != nil {
-				t.Log(err.Error())
 				return
 			}
 
-			hash := md5.Sum(buf[:chunkSize])
-			hashMap[int(buf[0])] = hash[:]
+			if _, ok := hashMap[int(buf[0])]; !ok {
+				hash := md5.Sum(buf[:chunkSize])
+				hashMap[int(buf[0])] = hash[:]
+			}
 		}
 
 		pongCh <- hashPair{
@@ -542,18 +545,16 @@ func testPacketConnTimeout(t *testing.T, pc net.PacketConn) error {
 
 func testSuit(t *testing.T, proxy C.ProxyAdapter) {
 	conn, err := proxy.DialContext(context.Background(), &C.Metadata{
-		Host:     localIP.String(),
-		DstPort:  "10001",
-		AddrType: socks5.AtypDomainName,
+		Host:    localIP.String(),
+		DstPort: 10001,
 	})
 	require.NoError(t, err)
 	defer conn.Close()
 	assert.NoError(t, testPingPongWithConn(t, conn))
 
 	conn, err = proxy.DialContext(context.Background(), &C.Metadata{
-		Host:     localIP.String(),
-		DstPort:  "10001",
-		AddrType: socks5.AtypDomainName,
+		Host:    localIP.String(),
+		DstPort: 10001,
 	})
 	require.NoError(t, err)
 	defer conn.Close()
@@ -564,10 +565,9 @@ func testSuit(t *testing.T, proxy C.ProxyAdapter) {
 	}
 
 	pc, err := proxy.ListenPacketContext(context.Background(), &C.Metadata{
-		NetWork:  C.UDP,
-		DstIP:    localIP,
-		DstPort:  "10001",
-		AddrType: socks5.AtypIPv4,
+		NetWork: C.UDP,
+		DstIP:   localIP.AsSlice(),
+		DstPort: 10001,
 	})
 	require.NoError(t, err)
 	defer pc.Close()
@@ -575,10 +575,9 @@ func testSuit(t *testing.T, proxy C.ProxyAdapter) {
 	assert.NoError(t, testPingPongWithPacketConn(t, pc))
 
 	pc, err = proxy.ListenPacketContext(context.Background(), &C.Metadata{
-		NetWork:  C.UDP,
-		DstIP:    localIP,
-		DstPort:  "10001",
-		AddrType: socks5.AtypIPv4,
+		NetWork: C.UDP,
+		DstIP:   localIP.AsSlice(),
+		DstPort: 10001,
 	})
 	require.NoError(t, err)
 	defer pc.Close()
@@ -586,10 +585,9 @@ func testSuit(t *testing.T, proxy C.ProxyAdapter) {
 	assert.NoError(t, testLargeDataWithPacketConn(t, pc))
 
 	pc, err = proxy.ListenPacketContext(context.Background(), &C.Metadata{
-		NetWork:  C.UDP,
-		DstIP:    localIP,
-		DstPort:  "10001",
-		AddrType: socks5.AtypIPv4,
+		NetWork: C.UDP,
+		DstIP:   localIP.AsSlice(),
+		DstPort: 10001,
 	})
 	require.NoError(t, err)
 	defer pc.Close()
@@ -625,9 +623,8 @@ func benchmarkProxy(b *testing.B, proxy C.ProxyAdapter) {
 	}()
 
 	conn, err := proxy.DialContext(context.Background(), &C.Metadata{
-		Host:     localIP.String(),
-		DstPort:  "10001",
-		AddrType: socks5.AtypDomainName,
+		Host:    localIP.String(),
+		DstPort: 10001,
 	})
 	require.NoError(b, err)
 
@@ -660,8 +657,8 @@ log-level: silent
 	require.NoError(t, err)
 	defer cleanup()
 
-	require.True(t, TCPing(net.JoinHostPort(localIP.String(), "10000")))
-	testPingPongWithSocksPort(t, 10000)
+	require.True(t, TCPing(net.JoinHostPort("127.0.0.1", "10000")))
+	require.NoError(t, testPingPongWithSocksPort(t, 10000))
 }
 
 func Benchmark_Direct(b *testing.B) {

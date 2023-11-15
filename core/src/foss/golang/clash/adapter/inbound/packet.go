@@ -2,7 +2,7 @@ package inbound
 
 import (
 	"net"
-	"strconv"
+	"net/netip"
 
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/transport/socks5"
@@ -20,20 +20,19 @@ func (s *PacketAdapter) Metadata() *C.Metadata {
 }
 
 // NewPacket is PacketAdapter generator
-func NewPacket(target socks5.Addr, packet C.UDPPacket, source C.Type) *PacketAdapter {
+func NewPacket(target socks5.Addr, originTarget net.Addr, packet C.UDPPacket, source C.Type) *PacketAdapter {
 	metadata := parseSocksAddr(target)
 	metadata.NetWork = C.UDP
 	metadata.Type = source
-	if ip, port, err := parseAddr(packet.LocalAddr().String()); err == nil {
+	if ip, port, err := parseAddr(packet.LocalAddr()); err == nil {
 		metadata.SrcIP = ip
-		metadata.SrcPort = port
+		metadata.SrcPort = C.Port(port)
 	}
-
-	if port, err := strconv.Atoi(metadata.DstPort); err == nil {
-		metadata.RawSrcAddr = packet.LocalAddr()
-		metadata.RawDstAddr = &net.UDPAddr{IP: metadata.DstIP, Port: port}
+	if originTarget != nil {
+		if addrPort, err := netip.ParseAddrPort(originTarget.String()); err == nil {
+			metadata.OriginDst = addrPort
+		}
 	}
-
 	return &PacketAdapter{
 		UDPPacket: packet,
 		metadata:  metadata,

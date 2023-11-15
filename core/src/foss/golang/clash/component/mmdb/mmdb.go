@@ -32,7 +32,7 @@ func Verify() bool {
 	return err == nil
 }
 
-func DefaultInstance() *geoip2.Reader {
+func Instance() *geoip2.Reader {
 	once.Do(func() {
 		var err error
 		mmdb, err = geoip2.Open(C.Path.MMDB())

@@ -36,10 +36,6 @@ func DialContext(ctx context.Context, network, address string, options ...Option
 }
 
 func ListenPacket(ctx context.Context, network, address string, options ...Option) (net.PacketConn, error) {
-	if DefaultSocketHook != nil {
-		return listenPacketHooked(ctx, network, address)
-	}
-
 	cfg := &option{
 		interfaceName: DefaultInterface.Load(),
 		routingMark:   int(DefaultRoutingMark.Load()),
@@ -55,7 +51,15 @@ func ListenPacket(ctx context.Context, network, address string, options ...Optio
 
 	lc := &net.ListenConfig{}
 	if cfg.interfaceName != "" {
-		addr, err := bindIfaceToListenConfig(cfg.interfaceName, lc, network, address)
+		var (
+			addr string
+			err  error
+		)
+		if cfg.fallbackBind {
+			addr, err = fallbackBindIfaceToListenConfig(cfg.interfaceName, lc, network, address)
+		} else {
+			addr, err = bindIfaceToListenConfig(cfg.interfaceName, lc, network, address)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -72,10 +76,6 @@ func ListenPacket(ctx context.Context, network, address string, options ...Optio
 }
 
 func dialContext(ctx context.Context, network string, destination net.IP, port string, options []Option) (net.Conn, error) {
-	if DefaultSocketHook != nil {
-		return dialContextHooked(ctx, network, destination, port)
-	}
-
 	opt := &option{
 		interfaceName: DefaultInterface.Load(),
 		routingMark:   int(DefaultRoutingMark.Load()),
@@ -91,8 +91,14 @@ func dialContext(ctx context.Context, network string, destination net.IP, port s
 
 	dialer := &net.Dialer{}
 	if opt.interfaceName != "" {
-		if err := bindIfaceToDialer(opt.interfaceName, dialer, network, destination); err != nil {
-			return nil, err
+		if opt.fallbackBind {
+			if err := fallbackBindIfaceToDialer(opt.interfaceName, dialer, network, destination); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := bindIfaceToDialer(opt.interfaceName, dialer, network, destination); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if opt.routingMark != 0 {
